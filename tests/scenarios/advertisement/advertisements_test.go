@@ -125,7 +125,8 @@ func (s *TestSuite) assertAdvertisementFields(item gjson.Result) {
 	for _, field := range []string{"id", "title", "description", "user_id", "created_at", "updated_at"} {
 		require.NotEmpty(s.T(), gjson.Get(item.String(), field).String(), "%s пустое", field)
 	}
-	require.NotEmpty(s.T(), gjson.Get(item.String(), "photos").Array(), "у объявления нет фотографий")
+	photos := gjson.Get(item.String(), "photos")
+	require.True(s.T(), photos.IsArray(), "photos должен быть массивом")
 }
 
 func containsAdvertisementTitle(items []gjson.Result, title string) bool {

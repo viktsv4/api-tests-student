@@ -33,3 +33,21 @@ func Login(t *testing.T, username, password string) models.LoginOkResponse {
 
 	return loginResponse
 }
+
+func Register(t *testing.T, expectedStatusCode int, request models.RegisterRequest) models.LoginOkResponse {
+	registerRawResponse := auth.HttpPostAuthRegister(t, request)
+	defer registerRawResponse.Body.Close()
+
+	require.Equalf(t, expectedStatusCode, registerRawResponse.StatusCode,
+		"HTTP status code должен быть %d", expectedStatusCode)
+
+	responseBytes, err := io.ReadAll(registerRawResponse.Body)
+	require.NoError(t, err, "не удалось прочитать ответ регистрации")
+
+	registerResponse := models.LoginOkResponse{}
+	err = json.Unmarshal(responseBytes, &registerResponse)
+	require.NoError(t, err, "ошибка регистрации")
+	require.NotEmpty(t, registerResponse.Token, "в ответе регистрации отсутствует токен")
+
+	return registerResponse
+}

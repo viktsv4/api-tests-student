@@ -19,3 +19,11 @@ func HttpPostAuthLogin(t *testing.T, request authModels.LoginRequest) *http.Resp
 		Status(http.StatusOK).
 		End().Response
 }
+
+func HttpPostAuthRegister(t *testing.T, request authModels.RegisterRequest) *http.Response {
+	return apiRunner.GetRunner().Create().Post(path.AuthRegisterPath).
+		ContentType("application/json").
+		JSON(request).
+		Expect(t).
+		End().Response
+}
