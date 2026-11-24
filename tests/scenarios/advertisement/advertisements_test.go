@@ -14,16 +14,16 @@ import (
 	"api-tests-template/internal/managers/auth"
 	"api-tests-template/internal/managers/auth/models"
 	"api-tests-template/internal/managers/myAdvertisements"
+	"api-tests-template/internal/utils"
 	base "api-tests-template/tests"
 )
 
 type TestSuite struct {
 	suite.Suite
-	advertisements gjson.Result
-	loginData      models.LoginOkResponse
+	advertisementID string
+	searchTitle     string
+	loginData       models.LoginOkResponse
 }
-
-const searchAdvertisementTitle = "ertyu"
 
 func TestSuiteRun(t *testing.T) {
 	suite.Run(t, &TestSuite{})
@@ -32,11 +32,11 @@ func TestSuiteRun(t *testing.T) {
 func (s *TestSuite) SetupSuite() {
 	base.SetupSuite()
 
-	base.Precondition("Получаем объявления, которые будут использоваться в проверках каталога")
-	body := myAdvertisements.GetAdvertisements(s.T(), http.StatusOK,
-		myAdvertisementsClient.AdvertisementListOptions{Limit: 10})
-	s.advertisements = gjson.Get(body, "items")
-	require.NotEmpty(s.T(), s.advertisements.Array(), "в публичном каталоге нет объявлений для проверки")
+	s.loginData = auth.Login(s.T(), os.Getenv("TEST_LOGIN"), os.Getenv("TEST_PASSWORD"))
+	base.Precondition("Создаём объявления для проверки каталога, поиска и сортировки по цене")
+	s.searchTitle = "Catalog" + utils.RandomString(18)
+	s.advertisementID = base.CreateAdvertisementFixture(s.T(), s.loginData.Token, s.searchTitle, 100)
+	base.CreateAdvertisementFixture(s.T(), s.loginData.Token, "Catalog"+utils.RandomString(18), 200)
 }
 
 func (s *TestSuite) TearDownSuite() {
@@ -48,19 +48,19 @@ func (s *TestSuite) TestGetAdvertisementsPositive() {
 	body := myAdvertisements.GetAdvertisements(s.T(), http.StatusOK,
 		myAdvertisementsClient.AdvertisementListOptions{Limit: 10})
 
-	s.advertisements = gjson.Get(body, "items")
-	require.True(s.T(), s.advertisements.IsArray(), "items должен быть массивом")
-	require.LessOrEqual(s.T(), len(s.advertisements.Array()), 10, "превышен запрошенный limit")
+	items := gjson.Get(body, "items")
+	require.True(s.T(), items.IsArray(), "items должен быть массивом")
+	require.LessOrEqual(s.T(), len(items.Array()), 10, "превышен запрошенный limit")
 	require.True(s.T(), gjson.Get(body, "total").Exists(), "в ответе отсутствует total")
 	require.True(s.T(), gjson.Get(body, "has_next").Exists(), "в ответе отсутствует has_next")
 
-	for _, item := range s.advertisements.Array() {
+	for _, item := range items.Array() {
 		s.assertAdvertisementFields(item)
 	}
 }
 
 func (s *TestSuite) TestGetAdvertisementByIDPositive() {
-	id := gjson.Get(s.advertisements.Array()[0].String(), "id").String()
+	id := s.advertisementID
 	body := myAdvertisements.GetAdvertisement(s.T(), http.StatusOK, id)
 	advertisement := gjson.Parse(body)
 
@@ -69,18 +69,18 @@ func (s *TestSuite) TestGetAdvertisementByIDPositive() {
 }
 
 func (s *TestSuite) TestSearchAdvertisements() {
-	s.loginData = auth.Login(s.T(), os.Getenv("TEST_LOGIN"), os.Getenv("TEST_PASSWORD"))
+	title := s.searchTitle
 
 	cases := []struct {
 		name  string
 		query string
 	}{
-		{name: "начало", query: "er"},
-		{name: "середина", query: "ty"},
-		{name: "конец", query: "yu"},
-		{name: "нижний_регистр", query: strings.ToLower(searchAdvertisementTitle)},
-		{name: "верхний_регистр", query: strings.ToUpper(searchAdvertisementTitle)},
-		{name: "смешанный_регистр", query: "eRtYu"},
+		{name: "начало", query: title[:13]},
+		{name: "середина", query: title[7:17]},
+		{name: "конец", query: title[len(title)-10:]},
+		{name: "нижний_регистр", query: strings.ToLower(title)},
+		{name: "верхний_регистр", query: strings.ToUpper(title)},
+		{name: "смешанный_регистр", query: "cAtAlOg" + title[len("Catalog"):]},
 	}
 
 	for _, testCase := range cases {
@@ -89,9 +89,8 @@ func (s *TestSuite) TestSearchAdvertisements() {
 				myAdvertisementsClient.AdvertisementListOptions{Search: testCase.query, Limit: 50})
 			items := gjson.Get(body, "items").Array()
 
-			require.NotEmpty(s.T(), items, "поиск не вернул результатов")
-			require.True(s.T(), containsAdvertisementTitle(items, searchAdvertisementTitle),
-				"в результатах поиска %q нет объявления %q", testCase.query, searchAdvertisementTitle)
+			require.True(s.T(), base.ContainsAdvertisementID(items, s.advertisementID),
+				"в результатах поиска %q нет объявления %q", testCase.query, title)
 		})
 	}
 }
@@ -103,6 +102,7 @@ func (s *TestSuite) TestSortAdvertisementsByPrice() {
 				myAdvertisementsClient.AdvertisementListOptions{SortBy: "price", SortOrder: order, Limit: 10})
 			items := gjson.Get(body, "items").Array()
 
+			require.GreaterOrEqual(s.T(), len(items), 2, "для проверки сортировки нужны две цены")
 			for index := 1; index < len(items); index++ {
 				previousPrice := gjson.Get(items[index-1].String(), "price").Float()
 				currentPrice := gjson.Get(items[index].String(), "price").Float()
@@ -127,14 +127,4 @@ func (s *TestSuite) assertAdvertisementFields(item gjson.Result) {
 	}
 	photos := gjson.Get(item.String(), "photos")
 	require.True(s.T(), photos.IsArray(), "photos должен быть массивом")
-}
-
-func containsAdvertisementTitle(items []gjson.Result, title string) bool {
-	for _, item := range items {
-		if gjson.Get(item.String(), "title").String() == title {
-			return true
-		}
-	}
-
-	return false
 }

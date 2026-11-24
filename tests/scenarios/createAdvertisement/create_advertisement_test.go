@@ -3,6 +3,7 @@ package createAdvertisement
 import (
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -89,6 +90,19 @@ func (s *testSuite) TestCreateAdvertisementWithAllParameters() {
 
 func (s *testSuite) TestCreateAdvertisementValidationErrors() {
 	longTitle := strings.Repeat("a", 256)
+	textFile := filepath.Join(s.T().TempDir(), "photo.txt")
+	require.NoError(s.T(), os.WriteFile(textFile, []byte("plain text"), 0600))
+	unsupportedPhoto := s.createRequest(s.uniqueTitle())
+	unsupportedPhoto.PhotoPaths = []string{textFile}
+
+	tooManyPhotos := s.createRequest(s.uniqueTitle())
+	for len(tooManyPhotos.PhotoPaths) < 4 {
+		tooManyPhotos.PhotoPaths = append(tooManyPhotos.PhotoPaths, base.CreatePNGFixture(s.T()))
+	}
+
+	negativeQuantity := s.createRequest(s.uniqueTitle())
+	negativeQuantity.Quantity = -1
+
 	testCases := []struct {
 		name        string
 		request     advertisementsClient.CreateRequest
@@ -100,6 +114,9 @@ func (s *testSuite) TestCreateAdvertisementValidationErrors() {
 		{name: "без_фотографий", request: advertisementsClient.CreateRequest{
 			Title: s.uniqueTitle(), Description: advertisementDescription, Price: advertisementPrice, Quantity: advertisementQuantity,
 		}, messagePart: "photo"},
+		{name: "неподдерживаемый_формат_фотографии", request: unsupportedPhoto, messagePart: `file type not allowed: extension ".txt"`},
+		{name: "четыре_фотографии", request: tooManyPhotos, messagePart: "maximum 3 photos allowed"},
+		{name: "отрицательное_количество_товара", request: negativeQuantity, messagePart: "quantity must be between 1 and 100 inclusive"},
 	}
 
 	for _, testCase := range testCases {

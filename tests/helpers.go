@@ -1,12 +1,16 @@
 package tests
 
 import (
+	"net/http"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+
+	advertisementsClient "api-tests-template/internal/client/http/advertisements"
+	"api-tests-template/internal/managers/advertisements"
 )
 
 var onePixelPNG = []byte{
@@ -36,6 +40,22 @@ func CreatePNGFixture(t *testing.T) string {
 	})
 
 	return file.Name()
+}
+
+// CreateAdvertisementFixture создаёт объявление и удаляет его после теста.
+func CreateAdvertisementFixture(t *testing.T, token, title string, price float64) string {
+	t.Helper()
+
+	body := advertisements.Create(t, token, http.StatusCreated, advertisementsClient.CreateRequest{
+		Title: title, Description: "Объявление для API-теста", Price: price,
+		Quantity: 1, PhotoPaths: []string{CreatePNGFixture(t)},
+	})
+	id := gjson.Get(body, "id").String()
+	require.NotEmpty(t, id, "в ответе создания отсутствует id объявления")
+	t.Cleanup(func() {
+		advertisements.Delete(t, token, http.StatusNoContent, id)
+	})
+	return id
 }
 
 // AssertAPIError проверяет код и сообщение ошибки из ответа API.
